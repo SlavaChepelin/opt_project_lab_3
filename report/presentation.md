@@ -1,0 +1,1 @@
+Ссылка на презентацию: [тык](https://docs.google.com/presentation/d/1o3rRaA9gsfOPH2XJ9vW1AXOxMChePQvI_rmQc717iOM/edit?usp=sharing)
