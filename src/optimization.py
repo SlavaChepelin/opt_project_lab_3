@@ -38,8 +38,41 @@ def subgradient_method(oracle, x_0, tolerance=1e-5, max_iter=1000, alpha_0=1.0,
         - history['time'] : list of floats, containing time in seconds passed from the start
         - history['x'] : list of np.arrays, containing the trajectory (ONLY STORE IF x.size <= 2)
     """
-    # TODO: implement.
-    pass
+    x = x_0.copy()
+    best_x = x.copy()
+    best_f = oracle.func(x)
+    history = defaultdict(list) if trace else None
+    start_time = time()
+
+    for k in range(max_iter):
+        if trace:
+            history['time'].append(time() - start_time)
+            history['func'].append(best_f)
+            if x.size <= 2:
+                history['x'].append(x.copy())
+
+        g = oracle.subgrad(x)
+        # alpha_k = alpha_0 / sqrt(k+1)
+        alpha = alpha_0 / np.sqrt(k + 1)
+        x_new = x - alpha * g
+
+        # Stopping criterion
+        if np.linalg.norm(x_new - x) / max(1.0, np.linalg.norm(x)) <= tolerance:
+            if trace:
+                history['time'].append(time() - start_time)
+                history['func'].append(oracle.func(x_new))
+                if x_new.size <= 2:
+                    history['x'].append(x_new.copy())
+            return best_x, 'success', history
+
+        x = x_new
+        # Best pointo
+        f_new = oracle.func(x)
+        if f_new < best_f:
+            best_f = f_new
+            best_x = x.copy()
+
+    return best_x, 'iterations_exceeded', history
 
 
 def proximal_gradient_method(oracle, x_0, L_0=1.0, tolerance=1e-5,
