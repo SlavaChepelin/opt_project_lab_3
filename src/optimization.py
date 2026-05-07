@@ -3,6 +3,9 @@ import numpy as np
 from numpy.linalg import norm, solve
 from time import time
 
+from src.oracles import L1RegOracle
+
+
 def subgradient_method(oracle, x_0, tolerance=1e-5, max_iter=1000, alpha_0=1.0,
                        display=False, trace=False):
     """
@@ -106,8 +109,47 @@ def proximal_gradient_method(oracle, x_0, L_0=1.0, tolerance=1e-5,
         'success' or 'iterations_exceeded'
     history : dictionary of lists or None
     """
-    # TODO: Implement
-    pass
+    x = x_0.copy()
+    L = L_0
+    history = defaultdict(list) if trace else None
+    start_time = time()
+
+    for k in range(max_iter):
+        # Save current history
+        if trace:
+            history['time'].append(time() - start_time)
+            history['func'].append(oracle.func(x))
+            if x.size <= 2:
+                history['x'].append(x.copy())
+
+        # Backtracking for Lipschitz constant
+        while True:
+            grad_f = oracle.grad(x)
+            y = x - grad_f / L
+            x_new = oracle.prox(y, 1.0 / L)
+
+            # f(x_new) <= f(x) + <grad f(x), x_new - x> + (L/2)||x_new - x||^2
+            f_x = oracle.f(x)  # We assume oracle has _f() for smooth part
+            f_new = oracle.f(x_new)
+            diff = x_new - x
+            rhs = f_x + np.dot(grad_f, diff) + (L / 2) * np.dot(diff, diff)
+            if f_new <= rhs:
+                break   # acceptable L
+            else:
+                L *= 2.0   # increase L and recompute
+        L /= 2.0
+
+        if np.linalg.norm(x_new - x) / max(1.0, np.linalg.norm(x)) <= tolerance:
+            if trace:
+                history['time'].append(time() - start_time)
+                history['func'].append(oracle.func(x_new))
+                if x_new.size <= 2:
+                    history['x'].append(x_new.copy())
+            return x_new, 'success', history
+
+        x = x_new
+
+    return x, 'iterations_exceeded', history
 
 def proximal_fast_gradient_method(oracle, x_0, L_0=1.0, tolerance=1e-5,
                                   max_iter=1000, trace=False, display=False):
@@ -142,8 +184,73 @@ def proximal_fast_gradient_method(oracle, x_0, L_0=1.0, tolerance=1e-5,
         - history['func'] : list of objective function values phi(x_k)
         - history['time'] : list of floats, containing time in seconds passed from the start
     """
-    # TODO: Implement
-    pass
+    x = x_0.copy()
+    v = x.copy()          # inertial sequence
+    A = 0.0               # accumulated weight
+    L = L_0
+    best_x = x.copy()
+    best_f = oracle.func(x)
+    history = defaultdict(list) if trace else None
+    start_time = time()
+
+    for k in range(max_iter):
+        if trace:
+            history['time'].append(time() - start_time)
+            history['func'].append(best_f)
+            if x.size <= 2:
+                history['x'].append(x.copy())
+
+        while True:
+            # a^2 = 1/L * (A + a)
+            # La^2 -a-A
+            # a_(k+1) = 1 + sqrt(1 + 4LA)/2L
+            discriminant = 1 + 4 * L * A
+            a = (1 + np.sqrt(discriminant)) / (2.0 * L)
+            A_new = A + a
+
+            y = (A * x + a * v) / A_new
+
+            grad_f = oracle.grad(y)
+            x_new = oracle.prox(y - grad_f / L, 1.0 / L)
+
+            f_y = oracle.f(y)
+            f_new = oracle.f(x_new)
+            diff = x_new - y
+            rhs = f_y + np.dot(grad_f, diff) + (L / 2) * np.dot(diff, diff)
+            if f_new <= rhs:
+                break
+            else:
+                L *= 2.0
+
+        v_new = v + (A_new / a) * (x_new - y)
+
+        x_prev = x.copy()
+        x = x_new
+        v = v_new
+        A = A_new
+        L /= 2.0
+
+        f_current = oracle.func(x)
+        if f_current < best_f:
+            best_f = f_current
+            best_x = x.copy()
+
+        f_y_total = oracle.func(y)
+        if f_y_total < best_f:
+            best_f = f_y_total
+            best_x = y.copy()
+
+        if k > 0 and np.linalg.norm(x - x_prev) / max(1.0, np.linalg.norm(x_prev)) <= tolerance:
+            if trace:
+                history['time'].append(time() - start_time)
+                history['func'].append(best_f)
+                if best_x.size <= 2:
+                    history['x'].append(best_x.copy())
+            return best_x, 'success', history
+
+
+
+    return best_x, 'iterations_exceeded', history
 
 
 def frank_wolfe_method(oracle, x_0, R, tolerance=1e-5, max_iter=1000,
@@ -175,7 +282,7 @@ def frank_wolfe_method(oracle, x_0, R, tolerance=1e-5, max_iter=1000,
     Returns
     -------
     x_star : np.array
-        The point found by the optimization procedure
+        The point found by the      # Also track the point y where we computed gradient (oracle was called)optimization procedure
     message : string
         'success' or 'iterations_exceeded'
     history : dictionary of lists or None
@@ -183,8 +290,46 @@ def frank_wolfe_method(oracle, x_0, R, tolerance=1e-5, max_iter=1000,
         - history['time'] : list of floats, containing time in seconds passed from the start
         - history['fw_gap'] : list of Frank-Wolfe gaps <grad f(x_k), x_k - y_k>
     """
-    # TODO: Implement (Don't forget to use L1RegOracle.lmo to find y_k)
-    pass
+    x = x_0.copy()
+    l1_oracle = L1RegOracle(regcoef=0.0)  # regcoef not used for lmo
+    history = defaultdict(list) if trace else None
+    start_time = time()
+
+    for k in range(1, max_iter + 1):
+        grad = oracle.grad(x)
+        y = l1_oracle.lmo(grad, R)
+        fw_gap = np.dot(grad, x - y)
+        if trace:
+            history['time'].append(time() - start_time)
+            history['func'].append(oracle.func(x))
+            history['fw_gap'].append(fw_gap)
+            if x.size <= 2:
+                history['x'].append(x.copy())
+        if fw_gap <= tolerance:
+            return x, 'success', history
+
+        if step_size_strategy == 'standard':
+            gamma = (k - 1) / (k + 1)   # starts at 0 for k=1
+        elif step_size_strategy == 'armijo':
+            beta = 0.5
+            c = 1e-4
+            d = y - x
+            f_x = oracle.func(x)
+            grad_dot = np.dot(grad, d)
+            gamma = 1.0
+            while True:
+                x_try = x + gamma * d
+                if oracle.func(x_try) <= f_x + c * gamma * grad_dot:
+                    break
+                gamma *= beta
+                if gamma < 1e-12:
+                    break
+        else:
+            raise ValueError("Unknown step_size_strategy: " + step_size_strategy)
+
+        x = x + gamma * (y - x)
+
+    return x, 'iterations_exceeded', history
 
 
 def barrier_method(oracle, x_0, u_0, lambda_reg, t_0=1.0, mu=10.0,

@@ -197,6 +197,9 @@ class BaseCompositeOracle:
     def prox(self, x, alpha):
         return self._h.prox(x, alpha)
 
+    def f(self, x):
+        return self._f.func(x)
+
 
 class BaseNonsmoothConvexOracle:
     """Базовый класс для негладкой выпуклой функции."""
