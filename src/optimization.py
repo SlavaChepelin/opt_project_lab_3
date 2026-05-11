@@ -1,9 +1,9 @@
 from collections import defaultdict
 import numpy as np
-from numpy.linalg import norm, solve
+from numpy.linalg import norm
 from time import time
 
-from src.oracles import L1RegOracle
+from oracles import L1RegOracle, BarrierL1Oracle
 
 
 def subgradient_method(oracle, x_0, tolerance=1e-5, max_iter=1000, alpha_0=1.0,
@@ -309,7 +309,7 @@ def frank_wolfe_method(oracle, x_0, R, tolerance=1e-5, max_iter=1000,
             return x, 'success', history
 
         if step_size_strategy == 'standard':
-            gamma = (k - 1) / (k + 1)   # starts at 0 for k=1
+            gamma = 2 / (k + 1)   # starts at 0 for k=1
         elif step_size_strategy == 'armijo':
             beta = 0.5
             c = 1e-4
@@ -327,7 +327,7 @@ def frank_wolfe_method(oracle, x_0, R, tolerance=1e-5, max_iter=1000,
         else:
             raise ValueError("Unknown step_size_strategy: " + step_size_strategy)
 
-        x = x + gamma * (y - x)
+        x =  x + (gamma) * (y-x)
 
     return x, 'iterations_exceeded', history
 
@@ -375,5 +375,66 @@ def barrier_method(oracle, x_0, u_0, lambda_reg, t_0=1.0, mu=10.0,
         'success' or 'iterations_exceeded'
     history : dictionary of lists or None
     """
-    # TODO: Implement (Use BarrierL1Oracle to wrap the base smooth oracle)
-    pass
+    x = x_0.copy()
+    u = u_0.copy()
+    n = x.size
+    t = t_0
+    history = defaultdict(list) if trace else None
+    start_time = time()
+
+    for outer_iter in range(max_iter):
+        inner_oracle = BarrierL1Oracle(oracle, lambda_reg, t)
+
+        z = np.concatenate([x, u])
+
+        for inner_iter in range(max_inner_iter):
+            grad_z = inner_oracle.grad(z)
+            # Inner stopping criterion: norm of gradient
+            if norm(grad_z) <= tolerance_inner:
+                break
+
+            hess_z = inner_oracle.hess(z)
+            try:
+                delta_z = np.linalg.solve(hess_z, -grad_z)
+            except np.linalg.LinAlgError:
+                delta_z = -grad_z   # fallback to gradient step
+
+            # Backtracking line search with feasibility guard
+            alpha = 1.0
+            beta = 0.5
+            c = 1e-4
+            while True:
+                z_new = z + alpha * delta_z
+                x_new = z_new[:n]
+                u_new = z_new[n:]
+
+                # Check strict feasibility: u_i > |x_i|
+                if np.any(u_new <= np.abs(x_new) + 1e-14):
+                    alpha *= beta
+                    continue
+
+                    # Armijo sufficient decrease
+                f_old = inner_oracle.func(z)
+                f_new = inner_oracle.func(z_new)
+                if f_new <= f_old + c * alpha * np.dot(grad_z, delta_z):
+                    break
+                alpha *= beta
+                if alpha < 1e-12:
+                    break
+
+            z = z_new
+            x = z[:n]
+            u = z[n:]
+
+        if trace:
+            history['time'].append(time() - start_time)
+            outer_obj = oracle.func(x) + lambda_reg * np.linalg.norm(x, 1)
+            history['func'].append(outer_obj)
+            if x.size <= 2:
+                history['x'].append(x.copy())
+
+        if 2 * n / t <= tolerance_outer:
+            return x, u, 'success', history
+        t *= mu
+
+    return x, u, 'iterations_exceeded', history

@@ -369,3 +369,4 @@ class ClassificationProxOracle(BaseCompositeOracle):
         f = ClassificationSmoothOracle(matvec_Ax, matvec_ATx, matmat_ATsA, b)
         h = L1RegOracle(regcoef)
         super().__init__(f, h)
+
