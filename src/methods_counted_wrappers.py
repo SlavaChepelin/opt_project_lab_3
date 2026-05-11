@@ -42,16 +42,18 @@ def frank_wolfe_wrapper_counted(data_kind, X, y, R, tolerance, max_iter, trace,
     return x_star, msg, hist
 
 def barrier_wrapper_counted(data_kind, X, y, lambda_reg, tolerance_inner, tolerance_outer,
-                            max_outer_iter, max_inner_iter, trace, **kwargs):
+                            max_outer_iter, max_inner_iter, trace,
+                            mu=10.0, **kwargs):
     oracle = make_smooth_oracle(data_kind, X, y)
     n = X.shape[1]
     x0 = np.zeros(n)
     u0 = np.ones(n) * 1.0
-    x_star, u_star, msg, hist = barrier_method_counted(oracle, x0, u0, lambda_reg,
-                                                       t_0=1.0, mu=10.0,
-                                                       tolerance_inner=tolerance_inner,
-                                                       tolerance_outer=tolerance_outer,
-                                                       max_iter=max_outer_iter,
-                                                       max_inner_iter=max_inner_iter,
-                                                       trace=trace)
+    x_star, _, msg, hist =  barrier_method_counted(oracle, x0, u0, lambda_reg,
+                                  t_0=1.0, mu=mu,
+                                  tolerance_inner=tolerance_inner,
+                                  tolerance_outer=tolerance_outer,
+                                  max_iter=max_outer_iter,
+                                  max_inner_iter=max_inner_iter,
+                                  trace=trace)
     return x_star, msg, hist
+

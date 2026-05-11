@@ -219,11 +219,12 @@ def frank_wolfe_method_counted(oracle, x_0, R, tolerance=1e-5, max_iter=1000,
 
     return x, 'iterations_exceeded', history
 
-
 def barrier_method_counted(oracle, x_0, u_0, lambda_reg, t_0=1.0, mu=10.0,
                            tolerance_inner=1e-6, tolerance_outer=1e-5,
                            max_iter=100, max_inner_iter=100, trace=False):
-    # Оборачиваем гладкий оракул счётчиком
+    """
+    Barrier method со счётчиком вызовов оракула и внутренних итераций.
+    """
     class CountedOracle:
         def __init__(self, oracle):
             self._oracle = oracle
@@ -254,11 +255,13 @@ def barrier_method_counted(oracle, x_0, u_0, lambda_reg, t_0=1.0, mu=10.0,
     t = t_0
     history = defaultdict(list) if trace else None
     start_time = time()
+    inner_iters_total = 0
 
     for outer_iter in range(max_iter):
         inner_oracle = BarrierL1Oracle(counted, lambda_reg, t)
         z = np.concatenate([x, u])
 
+        inner_iters = 0
         for inner_iter in range(max_inner_iter):
             grad_z = inner_oracle.grad(z)
             if norm(grad_z) <= tolerance_inner:
@@ -272,7 +275,7 @@ def barrier_method_counted(oracle, x_0, u_0, lambda_reg, t_0=1.0, mu=10.0,
 
             alpha = 1.0
             beta = 0.5
-            c = 1e-4
+            c_backtrack = 1e-4
             while True:
                 z_new = z + alpha * delta_z
                 x_new = z_new[:n]
@@ -284,7 +287,7 @@ def barrier_method_counted(oracle, x_0, u_0, lambda_reg, t_0=1.0, mu=10.0,
 
                 f_old = inner_oracle.func(z)
                 f_new = inner_oracle.func(z_new)
-                if f_new <= f_old + c * alpha * np.dot(grad_z, delta_z):
+                if f_new <= f_old + c_backtrack * alpha * np.dot(grad_z, delta_z):
                     break
                 alpha *= beta
                 if alpha < 1e-12:
@@ -293,18 +296,21 @@ def barrier_method_counted(oracle, x_0, u_0, lambda_reg, t_0=1.0, mu=10.0,
             z = z_new
             x = z[:n]
             u = z[n:]
+            inner_iters += 1
+
+        inner_iters_total += inner_iters
 
         if trace:
             history['time'].append(time() - start_time)
             outer_obj = oracle.func(x) + lambda_reg * np.linalg.norm(x, 1)
             history['func'].append(outer_obj)
             history['oracle_calls'].append(counted.total_calls)
+            history['inner_iters'].append(inner_iters_total)   # накопленное число внутренних итераций
             if x.size <= 2:
                 history['x'].append(x.copy())
 
         if 2 * n / t <= tolerance_outer:
             return x, u, 'success', history
-
         t *= mu
 
     return x, u, 'iterations_exceeded', history
