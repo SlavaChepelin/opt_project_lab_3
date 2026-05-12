@@ -3,37 +3,22 @@ import urllib.request
 import numpy as np
 from sklearn.datasets import load_svmlight_file
 
-# Глобальные конфигурации (можно вынести в параметры, если нужно)
 DATA_DIR = os.path.abspath('../data/libsvm')
 LIBSVM_BASE = 'https://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets'
 
+
 def download_if_missing(url, dest):
-    if not os.path.exists(dest) or os.path.getsize(dest) == 0:
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        import ssl
-        context = ssl._create_unverified_context()
-        urllib.request.urlretrieve(url, dest, context=context)
+    if os.path.exists(dest):
+        return
+    print(f"Скачивание {url}...")
+    import ssl
+    import urllib.request
+    context = ssl._create_unverified_context()
+    with urllib.request.urlopen(url, context=context) as response, open(dest, 'wb') as out_file:
+        out_file.write(response.read())
+
 
 def load_libsvm_scaled(kind, name, n_features=None):
-    """
-    Загружает масштабированный датасет LIBSVM.
-
-    Параметры
-    ----------
-    kind : str
-        'regression' или 'binary'
-    name : str
-        Имя датасета: 'abalone', 'bodyfat', 'a9a', 'gisette'
-    n_features : int, optional
-        Не используется, оставлен для совместимости.
-
-    Возвращает
-    ----------
-    X : scipy.sparse.csr_matrix
-    y : np.ndarray
-    info : dict
-        С ключами 'm', 'n', 'nnz'
-    """
     urls = {
         'regression': {
             'abalone': f'{LIBSVM_BASE}/regression/abalone_scale',
@@ -47,6 +32,7 @@ def load_libsvm_scaled(kind, name, n_features=None):
     if kind not in urls or name not in urls[kind]:
         raise ValueError(f'Unknown dataset: {kind}/{name}')
 
+    os.makedirs(DATA_DIR, exist_ok=True)
     local = os.path.join(DATA_DIR, os.path.basename(urls[kind][name]))
     download_if_missing(urls[kind][name], local)
 
@@ -58,10 +44,6 @@ def load_libsvm_scaled(kind, name, n_features=None):
 
 
 def ensure_binary_labels(y):
-    """
-    Приводит метки бинарной классификации к виду ±1.
-    Поддерживает [0,1], [1,2] и [-1,1].
-    """
     y = np.asarray(y, dtype=float).ravel()
     u = np.unique(y)
     if np.array_equal(sorted(u), [-1., 1.]):
@@ -74,41 +56,26 @@ def ensure_binary_labels(y):
 
 
 def matmat_ATsA_sparse(A, s):
-    """
-    Вычисляет A.T @ diag(s) @ A для разреженной матрицы A.
-    Возвращает плотную матрицу (обычно мала, если n невелико).
-    """
     s = np.asarray(s, dtype=float).reshape(-1)
     return (A.T @ A.multiply(s[:, np.newaxis])).toarray()
 
 
 def sparse_mv_ops(A):
-    """
-    Возвращает три функции:
-        matvec_Ax(x)    -> A @ x
-        matvec_ATx(v)   -> A.T @ v
-        matmat_ATsA(s)  -> A.T @ diag(s) @ A (плотная)
-    """
     def matvec_Ax(x):
         return A.dot(x)
-
     def matvec_ATx(v):
         return A.T.dot(v)
-
     def matmat_ATsA(s):
         return matmat_ATsA_sparse(A, s)
-
     return matvec_Ax, matvec_ATx, matmat_ATsA
 
 
 def make_logcosh_oracle(X, b, regcoef):
-    """Создаёт оракул для log-cosh регрессии с L2-регуляризацией."""
     from oracles import LogCoshL2Oracle
     Ax, ATx, ATsA = sparse_mv_ops(X)
     return LogCoshL2Oracle(Ax, ATx, ATsA, np.asarray(b, dtype=float).ravel(), regcoef)
 
 
 def make_exp_oracle(X, y, regcoef):
-    """Создаёт оракул для экспоненциальной (логистической) классификации с L2-регуляризацией."""
     from oracles import ExpLossL2Oracle
     return ExpLossL2Oracle(*sparse_mv_ops(X), ensure_binary_labels(y), regcoef)

@@ -129,6 +129,17 @@ def frank_wolfe_wrapper(data_kind, X, y, R, tolerance, max_iter, trace,
     return x_star, msg, hist
 
 
+def coordinate_descent_wrapper(data_kind, X, y, lambda_reg, tolerance, max_iter,
+                               trace, use_residual=True, **kwargs):
+    from optimization import cyclic_coordinate_descent
+    x0 = np.zeros(X.shape[1])
+    x_star, msg, hist = cyclic_coordinate_descent(
+        X, y, data_kind, lambda_reg, x_0=x0,
+        tolerance=tolerance, max_epochs=max_iter, trace=trace,
+        use_residual=use_residual)
+    return x_star, msg, hist
+
+
 def barrier_wrapper(data_kind, X, y, lambda_reg, tolerance_inner, tolerance_outer,
                     max_outer_iter, max_inner_iter, trace, **kwargs):
     oracle = make_smooth_oracle(data_kind, X, y)
